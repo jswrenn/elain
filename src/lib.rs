@@ -108,7 +108,7 @@ where
     ///     _align: Align<8>,
     /// }
     /// 
-    /// let foo: Foo = Foo { _align: Align::new() };
+    /// let foo: Foo = Foo { _align: Align::NEW };
     ///
     /// assert_eq!(align_of_val(&foo), 8);
     /// ```
