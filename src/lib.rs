@@ -7,7 +7,7 @@
 //! ```
 //! use elain::Align;
 //! use core::mem::{align_of, align_of_val};
-//! 
+//!
 //! assert_eq!(align_of::<Align<1>>(), 1);
 //! assert_eq!(align_of::<Align<2>>(), 2);
 //! assert_eq!(align_of::<Align<4>>(), 4);
@@ -18,7 +18,7 @@
 //! struct Foo {
 //!     _align: Align<FOO_ALIGN>,
 //! }
-//! 
+//!
 //! let foo: Foo = Foo { _align: Align::NEW };
 //!
 //! assert_eq!(align_of_val(&foo), 8);
@@ -38,17 +38,19 @@
 //! ```compile_fail
 //! use elain::Align;
 //!
+//! #[repr(C)]
 //! struct Foo<const N: usize> {
 //!     _align: Align<N>,
 //! }
 //! ```
 //! To resolve this error, add a `where` bound like so, using the
-//! [`Alignment`] trait to check that `Align<N>` is valid.
+//! [`Alignment`] trait to check that [`Align<N>`](Align) is valid.
 //!
 //! ```
 //! use elain::{Align, Alignment};
 //! use core::mem::align_of;
 //!
+//! #[repr(C)]
 //! struct Foo<const MIN_ALIGNMENT: usize>
 //! where
 //!     Align<MIN_ALIGNMENT>: Alignment
@@ -57,14 +59,17 @@
 //!     bar: u8,
 //!     baz: u16,
 //! }
-//! 
+//!
 //! assert_eq!(align_of::<Foo<1>>(), 2);
 //! assert_eq!(align_of::<Foo<2>>(), 2);
 //! assert_eq!(align_of::<Foo<4>>(), 4);
-//! ``` 
+//! ```
 #![no_std]
-use core::hash::Hash;
-use core::fmt::Debug;
+use core::{
+    cmp::{PartialOrd, Ordering},
+    fmt::{self, Debug},
+    hash::{Hash, Hasher},
+};
 
 /// A zero-sized-type aligned to `N`. Compound types containing a
 /// field `Align<N>` with have an alignment of *at least* `N`.
@@ -72,13 +77,14 @@ use core::fmt::Debug;
 /// ```
 /// use elain::Align;
 /// use core::mem::{align_of, align_of_val};
-/// 
+///
 /// assert_eq!(align_of::<Align<1>>(), 1);
 /// assert_eq!(align_of::<Align<2>>(), 2);
 /// assert_eq!(align_of::<Align<4>>(), 4);
 ///
 /// const FOO_ALIGN: usize = 8;
-///     
+///
+/// #[repr(C)]
 /// struct Foo {
 ///     _align: Align<FOO_ALIGN>,
 /// }
@@ -87,17 +93,20 @@ use core::fmt::Debug;
 ///
 /// assert_eq!(align_of_val(&foo), 8);
 /// ```
-#[derive(Debug, Default, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
+// NB: `Eq` and `PartialEq` are derived so that `Align` also
+// implements `StructuralEq` and `PartialStructuralEq`, which makes
+// `Align` usable as a const generic type. Just in case.
+#[derive(Eq, PartialEq)]
 #[repr(transparent)]
-pub struct Align<const N: usize>(<Self as Alignment>::Archetype)
+pub struct Align<const N: usize>([<Self as private::Sealed>::Archetype; 0])
 where
     Self: Alignment;
+
 
 impl<const N: usize> Align<N>
 where
     Self: Alignment
 {
-
     /// An instance of `Align<N>`.
     /// ```
     /// use elain::Align;
@@ -107,21 +116,23 @@ where
     /// struct Foo {
     ///     _align: Align<8>,
     /// }
-    /// 
+    ///
     /// let foo: Foo = Foo { _align: Align::NEW };
     ///
     /// assert_eq!(align_of_val(&foo), 8);
     /// ```
-    pub const NEW: Self = Self(<Self as Alignment>::ARCHETYPE);
+    pub const NEW: Self = Self([]);
 }
 
-/// Implemented for all `Align<N>` where `N` is a valid alignment
-/// (i.e., a power of two less-than-or-equal to 2<sup>28</sup>).
+/// Implemented for all [`Align<N>`](Align) where `N` is a
+/// valid alignment (i.e., a power of two less-than-or-equal to
+/// 2<sup>28</sup>).
 ///
 /// ```
 /// use elain::{Align, Alignment};
 /// use core::mem::align_of;
 ///
+/// #[repr(C)]
 /// struct Foo<const MIN_ALIGNMENT: usize>
 /// where
 ///     Align<MIN_ALIGNMENT>: Alignment
@@ -130,118 +141,183 @@ where
 ///     bar: u8,
 ///     baz: u16,
 /// }
-/// 
+///
 /// assert_eq!(align_of::<Foo<1>>(), 2);
 /// assert_eq!(align_of::<Foo<2>>(), 2);
 /// assert_eq!(align_of::<Foo<4>>(), 4);
 /// ```
-pub unsafe trait Alignment: private::Sealed {
-    /// A zero-sized type of particular alignment.
-    type Archetype
-      : Debug
-      + Default
-      + Copy
-      + Clone
-      + Hash
-      + Eq
-      + PartialEq<Self::Archetype>
-      + Ord
-      + PartialOrd<Self::Archetype>;
-
-    /// An instance of zero-sized types.
-    const ARCHETYPE: Self::Archetype;
-}
+pub unsafe trait Alignment: private::Sealed {}
 
 mod private {
-    pub trait Sealed {}
+    /// This trait is used internally to map an `Align<N>` to a unit
+    /// struct of alignment N.
+    pub trait Sealed {
+        /// A zero-sized type of particular alignment.
+        type Archetype: Copy + Eq + PartialEq + Send + Sync + Unpin;
+    }
 
-    impl Sealed for super::Align<        1> {}
-    impl Sealed for super::Align<        2> {}
-    impl Sealed for super::Align<        4> {}
-    impl Sealed for super::Align<        8> {}
-    impl Sealed for super::Align<       16> {}
-    impl Sealed for super::Align<       32> {}
-    impl Sealed for super::Align<       64> {}
-    impl Sealed for super::Align<      128> {}
-    impl Sealed for super::Align<      256> {}
-    impl Sealed for super::Align<      512> {}
-    impl Sealed for super::Align<     1024> {}
-    impl Sealed for super::Align<     2048> {}
-    impl Sealed for super::Align<     4096> {}
-    impl Sealed for super::Align<     8192> {}
-    impl Sealed for super::Align<    16384> {}
-    impl Sealed for super::Align<    32768> {}
-    impl Sealed for super::Align<    65536> {}
-    impl Sealed for super::Align<   131072> {}
-    impl Sealed for super::Align<   262144> {}
-    impl Sealed for super::Align<   524288> {}
-    impl Sealed for super::Align<  1048576> {}
-    impl Sealed for super::Align<  2097152> {}
-    impl Sealed for super::Align<  4194304> {}
-    impl Sealed for super::Align<  8388608> {}
-    impl Sealed for super::Align< 16777216> {}
-    impl Sealed for super::Align< 33554432> {}
-    impl Sealed for super::Align< 67108864> {}
-    impl Sealed for super::Align<134217728> {}
-    impl Sealed for super::Align<268435456> {}
+    impl Sealed for super::Align<        1> { type Archetype = Align1;         }
+    impl Sealed for super::Align<        2> { type Archetype = Align2;         }
+    impl Sealed for super::Align<        4> { type Archetype = Align4;         }
+    impl Sealed for super::Align<        8> { type Archetype = Align8;         }
+    impl Sealed for super::Align<       16> { type Archetype = Align16;        }
+    impl Sealed for super::Align<       32> { type Archetype = Align32;        }
+    impl Sealed for super::Align<       64> { type Archetype = Align64;        }
+    impl Sealed for super::Align<      128> { type Archetype = Align128;       }
+    impl Sealed for super::Align<      256> { type Archetype = Align256;       }
+    impl Sealed for super::Align<      512> { type Archetype = Align512;       }
+    impl Sealed for super::Align<     1024> { type Archetype = Align1024;      }
+    impl Sealed for super::Align<     2048> { type Archetype = Align2048;      }
+    impl Sealed for super::Align<     4096> { type Archetype = Align4096;      }
+    impl Sealed for super::Align<     8192> { type Archetype = Align8192;      }
+    impl Sealed for super::Align<    16384> { type Archetype = Align16384;     }
+    impl Sealed for super::Align<    32768> { type Archetype = Align32768;     }
+    impl Sealed for super::Align<    65536> { type Archetype = Align65536;     }
+    impl Sealed for super::Align<   131072> { type Archetype = Align131072;    }
+    impl Sealed for super::Align<   262144> { type Archetype = Align262144;    }
+    impl Sealed for super::Align<   524288> { type Archetype = Align524288;    }
+    impl Sealed for super::Align<  1048576> { type Archetype = Align1048576;   }
+    impl Sealed for super::Align<  2097152> { type Archetype = Align2097152;   }
+    impl Sealed for super::Align<  4194304> { type Archetype = Align4194304;   }
+    impl Sealed for super::Align<  8388608> { type Archetype = Align8388608;   }
+    impl Sealed for super::Align< 16777216> { type Archetype = Align16777216;  }
+    impl Sealed for super::Align< 33554432> { type Archetype = Align33554432;  }
+    impl Sealed for super::Align< 67108864> { type Archetype = Align67108864;  }
+    impl Sealed for super::Align<134217728> { type Archetype = Align134217728; }
+    impl Sealed for super::Align<268435456> { type Archetype = Align268435456; }
 
-    #[derive(Debug, Default, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)] #[repr(C, align(        1))] pub struct Alignment1;        
-    #[derive(Debug, Default, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)] #[repr(C, align(        2))] pub struct Alignment2;        
-    #[derive(Debug, Default, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)] #[repr(C, align(        4))] pub struct Alignment4;        
-    #[derive(Debug, Default, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)] #[repr(C, align(        8))] pub struct Alignment8;        
-    #[derive(Debug, Default, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)] #[repr(C, align(       16))] pub struct Alignment16;       
-    #[derive(Debug, Default, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)] #[repr(C, align(       32))] pub struct Alignment32;       
-    #[derive(Debug, Default, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)] #[repr(C, align(       64))] pub struct Alignment64;       
-    #[derive(Debug, Default, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)] #[repr(C, align(      128))] pub struct Alignment128;      
-    #[derive(Debug, Default, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)] #[repr(C, align(      256))] pub struct Alignment256;      
-    #[derive(Debug, Default, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)] #[repr(C, align(      512))] pub struct Alignment512;      
-    #[derive(Debug, Default, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)] #[repr(C, align(     1024))] pub struct Alignment1024;     
-    #[derive(Debug, Default, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)] #[repr(C, align(     2048))] pub struct Alignment2048;     
-    #[derive(Debug, Default, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)] #[repr(C, align(     4096))] pub struct Alignment4096;     
-    #[derive(Debug, Default, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)] #[repr(C, align(     8192))] pub struct Alignment8192;     
-    #[derive(Debug, Default, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)] #[repr(C, align(    16384))] pub struct Alignment16384;    
-    #[derive(Debug, Default, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)] #[repr(C, align(    32768))] pub struct Alignment32768;    
-    #[derive(Debug, Default, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)] #[repr(C, align(    65536))] pub struct Alignment65536;    
-    #[derive(Debug, Default, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)] #[repr(C, align(   131072))] pub struct Alignment131072;   
-    #[derive(Debug, Default, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)] #[repr(C, align(   262144))] pub struct Alignment262144;   
-    #[derive(Debug, Default, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)] #[repr(C, align(   524288))] pub struct Alignment524288;   
-    #[derive(Debug, Default, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)] #[repr(C, align(  1048576))] pub struct Alignment1048576;  
-    #[derive(Debug, Default, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)] #[repr(C, align(  2097152))] pub struct Alignment2097152;  
-    #[derive(Debug, Default, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)] #[repr(C, align(  4194304))] pub struct Alignment4194304;  
-    #[derive(Debug, Default, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)] #[repr(C, align(  8388608))] pub struct Alignment8388608;  
-    #[derive(Debug, Default, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)] #[repr(C, align( 16777216))] pub struct Alignment16777216; 
-    #[derive(Debug, Default, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)] #[repr(C, align( 33554432))] pub struct Alignment33554432; 
-    #[derive(Debug, Default, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)] #[repr(C, align( 67108864))] pub struct Alignment67108864; 
-    #[derive(Debug, Default, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)] #[repr(C, align(134217728))] pub struct Alignment134217728;
-    #[derive(Debug, Default, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)] #[repr(C, align(268435456))] pub struct Alignment268435456;
+    // NB: It'd be great if these could be void enums, as doing so
+    // greatly simplifies the expansion of derived traits.
+    #[derive(Copy, Clone, Eq, PartialEq)] #[repr(align(        1))] pub struct Align1         {}
+    #[derive(Copy, Clone, Eq, PartialEq)] #[repr(align(        2))] pub struct Align2         {}
+    #[derive(Copy, Clone, Eq, PartialEq)] #[repr(align(        4))] pub struct Align4         {}
+    #[derive(Copy, Clone, Eq, PartialEq)] #[repr(align(        8))] pub struct Align8         {}
+    #[derive(Copy, Clone, Eq, PartialEq)] #[repr(align(       16))] pub struct Align16        {}
+    #[derive(Copy, Clone, Eq, PartialEq)] #[repr(align(       32))] pub struct Align32        {}
+    #[derive(Copy, Clone, Eq, PartialEq)] #[repr(align(       64))] pub struct Align64        {}
+    #[derive(Copy, Clone, Eq, PartialEq)] #[repr(align(      128))] pub struct Align128       {}
+    #[derive(Copy, Clone, Eq, PartialEq)] #[repr(align(      256))] pub struct Align256       {}
+    #[derive(Copy, Clone, Eq, PartialEq)] #[repr(align(      512))] pub struct Align512       {}
+    #[derive(Copy, Clone, Eq, PartialEq)] #[repr(align(     1024))] pub struct Align1024      {}
+    #[derive(Copy, Clone, Eq, PartialEq)] #[repr(align(     2048))] pub struct Align2048      {}
+    #[derive(Copy, Clone, Eq, PartialEq)] #[repr(align(     4096))] pub struct Align4096      {}
+    #[derive(Copy, Clone, Eq, PartialEq)] #[repr(align(     8192))] pub struct Align8192      {}
+    #[derive(Copy, Clone, Eq, PartialEq)] #[repr(align(    16384))] pub struct Align16384     {}
+    #[derive(Copy, Clone, Eq, PartialEq)] #[repr(align(    32768))] pub struct Align32768     {}
+    #[derive(Copy, Clone, Eq, PartialEq)] #[repr(align(    65536))] pub struct Align65536     {}
+    #[derive(Copy, Clone, Eq, PartialEq)] #[repr(align(   131072))] pub struct Align131072    {}
+    #[derive(Copy, Clone, Eq, PartialEq)] #[repr(align(   262144))] pub struct Align262144    {}
+    #[derive(Copy, Clone, Eq, PartialEq)] #[repr(align(   524288))] pub struct Align524288    {}
+    #[derive(Copy, Clone, Eq, PartialEq)] #[repr(align(  1048576))] pub struct Align1048576   {}
+    #[derive(Copy, Clone, Eq, PartialEq)] #[repr(align(  2097152))] pub struct Align2097152   {}
+    #[derive(Copy, Clone, Eq, PartialEq)] #[repr(align(  4194304))] pub struct Align4194304   {}
+    #[derive(Copy, Clone, Eq, PartialEq)] #[repr(align(  8388608))] pub struct Align8388608   {}
+    #[derive(Copy, Clone, Eq, PartialEq)] #[repr(align( 16777216))] pub struct Align16777216  {}
+    #[derive(Copy, Clone, Eq, PartialEq)] #[repr(align( 33554432))] pub struct Align33554432  {}
+    #[derive(Copy, Clone, Eq, PartialEq)] #[repr(align( 67108864))] pub struct Align67108864  {}
+    #[derive(Copy, Clone, Eq, PartialEq)] #[repr(align(134217728))] pub struct Align134217728 {}
+    #[derive(Copy, Clone, Eq, PartialEq)] #[repr(align(268435456))] pub struct Align268435456 {}
 }
 
-unsafe impl Alignment for Align<        1> { type Archetype = private::Alignment1;         const ARCHETYPE: Self::Archetype = private::Alignment1;         }
-unsafe impl Alignment for Align<        2> { type Archetype = private::Alignment2;         const ARCHETYPE: Self::Archetype = private::Alignment2;         }
-unsafe impl Alignment for Align<        4> { type Archetype = private::Alignment4;         const ARCHETYPE: Self::Archetype = private::Alignment4;         }
-unsafe impl Alignment for Align<        8> { type Archetype = private::Alignment8;         const ARCHETYPE: Self::Archetype = private::Alignment8;         }
-unsafe impl Alignment for Align<       16> { type Archetype = private::Alignment16;        const ARCHETYPE: Self::Archetype = private::Alignment16;        }
-unsafe impl Alignment for Align<       32> { type Archetype = private::Alignment32;        const ARCHETYPE: Self::Archetype = private::Alignment32;        }
-unsafe impl Alignment for Align<       64> { type Archetype = private::Alignment64;        const ARCHETYPE: Self::Archetype = private::Alignment64;        }
-unsafe impl Alignment for Align<      128> { type Archetype = private::Alignment128;       const ARCHETYPE: Self::Archetype = private::Alignment128;       }
-unsafe impl Alignment for Align<      256> { type Archetype = private::Alignment256;       const ARCHETYPE: Self::Archetype = private::Alignment256;       }
-unsafe impl Alignment for Align<      512> { type Archetype = private::Alignment512;       const ARCHETYPE: Self::Archetype = private::Alignment512;       }
-unsafe impl Alignment for Align<     1024> { type Archetype = private::Alignment1024;      const ARCHETYPE: Self::Archetype = private::Alignment1024;      }
-unsafe impl Alignment for Align<     2048> { type Archetype = private::Alignment2048;      const ARCHETYPE: Self::Archetype = private::Alignment2048;      }
-unsafe impl Alignment for Align<     4096> { type Archetype = private::Alignment4096;      const ARCHETYPE: Self::Archetype = private::Alignment4096;      }
-unsafe impl Alignment for Align<     8192> { type Archetype = private::Alignment8192;      const ARCHETYPE: Self::Archetype = private::Alignment8192;      }
-unsafe impl Alignment for Align<    16384> { type Archetype = private::Alignment16384;     const ARCHETYPE: Self::Archetype = private::Alignment16384;     }
-unsafe impl Alignment for Align<    32768> { type Archetype = private::Alignment32768;     const ARCHETYPE: Self::Archetype = private::Alignment32768;     }
-unsafe impl Alignment for Align<    65536> { type Archetype = private::Alignment65536;     const ARCHETYPE: Self::Archetype = private::Alignment65536;     }
-unsafe impl Alignment for Align<   131072> { type Archetype = private::Alignment131072;    const ARCHETYPE: Self::Archetype = private::Alignment131072;    }
-unsafe impl Alignment for Align<   262144> { type Archetype = private::Alignment262144;    const ARCHETYPE: Self::Archetype = private::Alignment262144;    }
-unsafe impl Alignment for Align<   524288> { type Archetype = private::Alignment524288;    const ARCHETYPE: Self::Archetype = private::Alignment524288;    }
-unsafe impl Alignment for Align<  1048576> { type Archetype = private::Alignment1048576;   const ARCHETYPE: Self::Archetype = private::Alignment1048576;   }
-unsafe impl Alignment for Align<  2097152> { type Archetype = private::Alignment2097152;   const ARCHETYPE: Self::Archetype = private::Alignment2097152;   }
-unsafe impl Alignment for Align<  4194304> { type Archetype = private::Alignment4194304;   const ARCHETYPE: Self::Archetype = private::Alignment4194304;   }
-unsafe impl Alignment for Align<  8388608> { type Archetype = private::Alignment8388608;   const ARCHETYPE: Self::Archetype = private::Alignment8388608;   }
-unsafe impl Alignment for Align< 16777216> { type Archetype = private::Alignment16777216;  const ARCHETYPE: Self::Archetype = private::Alignment16777216;  }
-unsafe impl Alignment for Align< 33554432> { type Archetype = private::Alignment33554432;  const ARCHETYPE: Self::Archetype = private::Alignment33554432;  }
-unsafe impl Alignment for Align< 67108864> { type Archetype = private::Alignment67108864;  const ARCHETYPE: Self::Archetype = private::Alignment67108864;  }
-unsafe impl Alignment for Align<134217728> { type Archetype = private::Alignment134217728; const ARCHETYPE: Self::Archetype = private::Alignment134217728; }
-unsafe impl Alignment for Align<268435456> { type Archetype = private::Alignment268435456; const ARCHETYPE: Self::Archetype = private::Alignment268435456; }
+// NB: While these impls could be reduced to a single:
+//    unsafe impl<const N: usize> Alignment for Align<N>
+//    where
+//        Self: private::Sealed
+//    {}
+// …leaving them enumerated makes explicit what alignments are valid.
+unsafe impl Alignment for Align<        1> {}
+unsafe impl Alignment for Align<        2> {}
+unsafe impl Alignment for Align<        4> {}
+unsafe impl Alignment for Align<        8> {}
+unsafe impl Alignment for Align<       16> {}
+unsafe impl Alignment for Align<       32> {}
+unsafe impl Alignment for Align<       64> {}
+unsafe impl Alignment for Align<      128> {}
+unsafe impl Alignment for Align<      256> {}
+unsafe impl Alignment for Align<      512> {}
+unsafe impl Alignment for Align<     1024> {}
+unsafe impl Alignment for Align<     2048> {}
+unsafe impl Alignment for Align<     4096> {}
+unsafe impl Alignment for Align<     8192> {}
+unsafe impl Alignment for Align<    16384> {}
+unsafe impl Alignment for Align<    32768> {}
+unsafe impl Alignment for Align<    65536> {}
+unsafe impl Alignment for Align<   131072> {}
+unsafe impl Alignment for Align<   262144> {}
+unsafe impl Alignment for Align<   524288> {}
+unsafe impl Alignment for Align<  1048576> {}
+unsafe impl Alignment for Align<  2097152> {}
+unsafe impl Alignment for Align<  4194304> {}
+unsafe impl Alignment for Align<  8388608> {}
+unsafe impl Alignment for Align< 16777216> {}
+unsafe impl Alignment for Align< 33554432> {}
+unsafe impl Alignment for Align< 67108864> {}
+unsafe impl Alignment for Align<134217728> {}
+unsafe impl Alignment for Align<268435456> {}
+
+
+// NB: These traits are implemented explicitly, rather than derived,
+// because their implementations do not depend on `Align`'s field.
+
+impl<const N: usize> Copy for Align<N>
+where
+    Self: Alignment
+{}
+
+impl<const N: usize> Clone for Align<N>
+where
+    Self: Alignment
+{
+    #[inline(always)]
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<const N: usize> Debug for Align<N>
+where
+    Self: Alignment
+{
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(core::any::type_name::<Self>())
+    }
+}
+
+impl<const N: usize> Default for Align<N>
+where
+    Self: Alignment
+{
+    #[inline(always)]
+    fn default() -> Self {
+        Self([])
+    }
+}
+
+impl<const N: usize> Hash for Align<N>
+where
+    Self: Alignment
+{
+    #[inline(always)]
+    fn hash<H: Hasher>(&self, _: &mut H) {}
+}
+
+impl<const N: usize> Ord for Align<N>
+where
+    Self: Alignment
+{
+    #[inline(always)]
+    fn cmp(&self, _: &Self) -> Ordering {
+        Ordering::Equal
+    }
+}
+
+impl<const N: usize> PartialOrd<Self> for Align<N>
+where
+    Self: Alignment
+{
+    #[inline(always)]
+    fn partial_cmp(&self, _: &Self) -> Option<Ordering> {
+        Some(Ordering::Equal)
+    }
+}
