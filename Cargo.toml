@@ -1,6 +1,6 @@
 [package]
 name = "elain"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["Jack Wrenn <me@jswrenn.com>"]
 edition = "2018"
 description = "Set a type's minimum alignment with const generics."
