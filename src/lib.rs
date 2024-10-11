@@ -24,7 +24,7 @@
 //! assert_eq!(align_of_val(&foo), 8);
 //! ```
 //!
-//! Valid alignments are powers of two less-than-or-equal to 2<sup>28</sup>.
+//! Valid alignments are powers of two less-than-or-equal to 2<sup>29</sup>.
 //! Supplying an *invalid* alignment to [`Align`] is a type error:
 //! ```compile_fail
 //! use elain::Align;
@@ -184,6 +184,7 @@ mod private {
     #[rustfmt::skip] impl Sealed for super::Align< 67108864> { type Archetype = Align67108864;  }
     #[rustfmt::skip] impl Sealed for super::Align<134217728> { type Archetype = Align134217728; }
     #[rustfmt::skip] impl Sealed for super::Align<268435456> { type Archetype = Align268435456; }
+    #[rustfmt::skip] impl Sealed for super::Align<536870912> { type Archetype = Align536870912; }
 
     // NB: It'd be great if these could be void enums, as doing so
     // greatly simplifies the expansion of derived traits.
@@ -216,6 +217,7 @@ mod private {
     #[rustfmt::skip] #[derive(Copy, Clone, Eq, PartialEq)] #[repr(align( 67108864))] pub struct Align67108864  {}
     #[rustfmt::skip] #[derive(Copy, Clone, Eq, PartialEq)] #[repr(align(134217728))] pub struct Align134217728 {}
     #[rustfmt::skip] #[derive(Copy, Clone, Eq, PartialEq)] #[repr(align(268435456))] pub struct Align268435456 {}
+    #[rustfmt::skip] #[derive(Copy, Clone, Eq, PartialEq)] #[repr(align(536870912))] pub struct Align536870912 {}
 }
 
 // NB: While these impls could be reduced to a single:
@@ -253,6 +255,7 @@ mod private {
 #[rustfmt::skip] unsafe impl Alignment for Align< 67108864> {}
 #[rustfmt::skip] unsafe impl Alignment for Align<134217728> {}
 #[rustfmt::skip] unsafe impl Alignment for Align<268435456> {}
+#[rustfmt::skip] unsafe impl Alignment for Align<536870912> {}
 
 // NB: These traits are implemented explicitly, rather than derived,
 // because their implementations do not depend on `Align`'s field.
